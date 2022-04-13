@@ -12,12 +12,10 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
-#define FREE_BLOCKS		   4000000
+#define MEM_SET			   4000
 
 int MOUNTED = 0;
-int BITMAP[FREE_BLOCKS]; 
-union fs_block BLOCK;
-const char *EMPTY; 
+int BITMAP[MEM_SET]; 
 
 struct fs_superblock {
 	int magic;
@@ -40,17 +38,22 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
+union fs_block SUPER_BLOCK;
+union fs_block INODE_BLOCKS[MEM_SET];
+
+
+
 int fs_format() {
 
 	// check if the file system has already been mounted → return fail if already mounted
-	if (BLOCK.super.magic == FS_MAGIC) { 
+	if (SUPER_BLOCK.super.magic == FS_MAGIC) { 
 		return 0;
 	}
 
 	int nblocks = disk_size();
 
 	// read superblock information
-	disk_read(0, BLOCK.data); 
+	disk_read(0, SUPER_BLOCK.data); 
 
 	// set 10% of the blocks for inodes, needs to round up
 	int ninodeblocks = 0.1 * nblocks;
@@ -62,13 +65,20 @@ int fs_format() {
 
 	// clear the inode table
 	for(int j = 1; j <= ninodeblocks; j++) {
-		union fs_block inode_block;
 		for (int k = 0; k < INODES_PER_BLOCK; k++) {
 			struct fs_inode inode;
 			inode.isvalid = 0;
-			inode_block.inode[k] = inode;
+			// for testing
+			if ((j == 1) && (k == 2)) {
+				inode.isvalid = 1;
+				inode.size = 52;
+			}
+			if ((j == 2) && (k == 2)) {
+				inode.isvalid = 1;
+				inode.size = 67;
+			}
+			INODE_BLOCKS[j].inode[k] = inode;
 		}
-		disk_write(j, inode_block.data);
 	}
 
 	struct fs_superblock super;
@@ -76,9 +86,9 @@ int fs_format() {
 	super.nblocks = nblocks;
 	super.ninodeblocks = ninodeblocks; 
 	super.ninodes = INODES_PER_BLOCK * ninodeblocks;
-	BLOCK.super = super;
+	SUPER_BLOCK.super = super;
 
-	disk_write(0, BLOCK.data);
+	disk_write(0, SUPER_BLOCK.data);
 
 	return 1;
 }
@@ -87,27 +97,44 @@ void fs_debug()
 {
 
 	printf("superblock:\n");
-	printf("magic number: %d\n", BLOCK.super.magic);
-	printf("    %d blocks\n",BLOCK.super.nblocks);
-	printf("    %d inode blocks\n",BLOCK.super.ninodeblocks);
-	printf("    %d inodes\n",BLOCK.super.ninodes);
+	if(SUPER_BLOCK.super.magic == FS_MAGIC) {
+		printf("    magic number is valid\n");
+	} else {
+		printf("    magic number is invalid\n");
+	}
+	printf("    %d blocks on disk\n",SUPER_BLOCK.super.nblocks);
+	printf("    %d blocks for inodes\n",SUPER_BLOCK.super.ninodeblocks);
+	printf("    %d inodes total\n",SUPER_BLOCK.super.ninodes);
 
+	// inode information
+	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
+
+		// read the inode block for data
+		for (int j = 0; j < INODES_PER_BLOCK; j++) {
+			struct fs_inode curr_inode = INODE_BLOCKS[i].inode[j];
+			int inumber = (i-1) * INODES_PER_BLOCK + j;
+			if (curr_inode.isvalid) {
+				printf("inode %d:\n", inumber);
+				printf("    size: %d bytes\n", curr_inode.size);
+			}
+		}
+	}
 }
 
 int fs_mount()
 {
-	if (BLOCK.super.magic != FS_MAGIC) { 
+	if (SUPER_BLOCK.super.magic != FS_MAGIC) { 
 		return 0;
 	}
 
 	// build free block bitmap & prepare fs for use
 	BITMAP[0] = 1;
 
-	for (int in = 1; in <= BLOCK.super.ninodeblocks; in++) {
+	for (int in = 1; in <= SUPER_BLOCK.super.ninodeblocks; in++) {
 		BITMAP[in] = 1;
 	}
 
-	for (int ib = BLOCK.super.ninodeblocks + 1; ib < BLOCK.super.ninodeblocks; ib++) {
+	for (int ib = SUPER_BLOCK.super.ninodeblocks + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
 		BITMAP[ib] = 0;
 	}
 	return 1;
