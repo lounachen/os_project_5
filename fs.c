@@ -12,11 +12,11 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
-#define FREE_BLOCKS		   5
+#define FREE_BLOCKS		   4000000
+
 int MOUNTED = 0;
 int BITMAP[FREE_BLOCKS]; 
 union fs_block BLOCK;
-
 const char *EMPTY; 
 
 struct fs_superblock {
@@ -54,16 +54,21 @@ int fs_format() {
 
 	// set 10% of the blocks for inodes, needs to round up
 	int ninodeblocks = 0.1 * nblocks;
+	double check_num = 0.1 * (double) nblocks;
 
-	if (ninodeblocks == 0) {
-		ninodeblocks = 1;
+	if (ninodeblocks != check_num) {
+		ninodeblocks += 1;
 	}
-	// BLOCK.super.nblocks=disk_size();
-	printf("nblocks: %d\n", nblocks);
 
 	// clear the inode table
 	for(int j = 1; j <= ninodeblocks; j++) {
-		disk_write(j, "0x0");
+		union fs_block inode_block;
+		for (int k = 0; k < INODES_PER_BLOCK; k++) {
+			struct fs_inode inode;
+			inode.isvalid = 0;
+			inode_block.inode[k] = inode;
+		}
+		disk_write(j, inode_block.data);
 	}
 
 	struct fs_superblock super;
@@ -73,13 +78,6 @@ int fs_format() {
 	super.ninodes = INODES_PER_BLOCK * ninodeblocks;
 	BLOCK.super = super;
 
-	printf("%d\n", BLOCK.super.ninodeblocks);
-	// writes the superblock
-	// BLOCK.super.magic = FS_MAGIC;
-	// BLOCK.super.nblocks = nblocks;
-	// BLOCK.super.ninodeblocks = ninodeblocks;
-	// BLOCK.super.ninodes = INODES_PER_BLOCK * ninodeblocks;
-
 	disk_write(0, BLOCK.data);
 
 	return 1;
@@ -87,7 +85,6 @@ int fs_format() {
 
 void fs_debug()
 {
-	disk_read(0, BLOCK.data);
 
 	printf("superblock:\n");
 	printf("magic number: %d\n", BLOCK.super.magic);
@@ -103,6 +100,16 @@ int fs_mount()
 		return 0;
 	}
 
+	// build free block bitmap & prepare fs for use
+	BITMAP[0] = 1;
+
+	for (int in = 1; in <= BLOCK.super.ninodeblocks; in++) {
+		BITMAP[in] = 1;
+	}
+
+	for (int ib = BLOCK.super.ninodeblocks + 1; ib < BLOCK.super.ninodeblocks; ib++) {
+		BITMAP[ib] = 0;
+	}
 	return 1;
 }
 
