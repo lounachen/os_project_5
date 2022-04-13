@@ -47,12 +47,9 @@ union fs_block {
 
 int fs_format() {
 	// check if the file system has already been mounted → return fail if already mounted
-	if (BLOCK.super.magic == FS_MAGIC) {  // Hanjing: I think we need to have this function in mount, not format why
-		return 0;  							// bc "format rountine places this FS_MAGIC into superblock" 
-	}										// "When the filesystem is mounted, the OS looks for this magic number."
-											// so the comparison of magic to FS_MAGIC is in mount
-											// yea so like when they are equal its mounted? if not it isnt 很有道理！
-	
+	if (BLOCK.super.magic == FS_MAGIC) {  
+		return 0;  							
+	}										
 	// read superblock information
 	disk_read(0, BLOCK.data); 
 	
@@ -98,6 +95,7 @@ int fs_format() {
 
 void fs_debug()
 {
+	disk_read(0, BLOCK.data);
 	printf("superblock:\n");
 	if(BLOCK.super.magic == FS_MAGIC) {
 		printf("    magic number is valid\n");
@@ -108,9 +106,22 @@ void fs_debug()
 	printf("    %d blocks for inodes\n", BLOCK.super.ninodeblocks);
 	printf("    %d inodes total\n", BLOCK.super.ninodes);
 
-	/*printf("    %d blocks\n",BLOCK.super.nblocks);
-	printf("    %d inode blocks\n",BLOCK.super.ninodeblocks);
-	printf("    %d inodes\n",BLOCK.super.ninodes);*/
+	// check inode block
+	for (int i = 1; i <= BLOCK.super.ninodeblocks; i++){
+		disk_read(i, BLOCK.data);
+
+		for (int j = 0; j < INODES_PER_BLOCK; j++){
+			int inumber = (i-1) * INODES_PER_BLOCK + j;
+			// get current inode
+			struct fs_inode curr_inode = BLOCK.inode[j];
+			printf("inode %d:\n", inumber);
+			printf("\t size: %d bytes\n", curr_inode.size);
+
+			// check for direct block
+
+			// check for indirect block
+		}
+	}
 }
 
 int fs_mount()
