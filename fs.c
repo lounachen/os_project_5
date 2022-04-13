@@ -152,6 +152,27 @@ int fs_mount()
 
 int fs_create()
 {
+	// check inode
+	for (int i = 1; i < BLOCK.super.ninodes; i++){
+		int block_number = i / INODES_PER_BLOCK + 1;
+		int offset = i % INODES_PER_BLOCK;
+		// read the block with the curr_inode
+		disk_read(block_number, BLOCK.data);
+
+		// load the inode
+		struct fs_inode curr_inode;
+		curr_inode = BLOCK.inode[offset];
+
+		// if the curr_inode is valid
+		if (curr_inode.isvalid) continue;
+		
+		// initialize
+		memset(&curr_inode, 0, sizeof(struct fs_inode));
+		curr_inode.isvalid = 1;
+
+		return i;
+	}
+	printf("Error creating new inode\n");
 	return 0;
 }
 
