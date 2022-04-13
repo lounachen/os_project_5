@@ -12,10 +12,11 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
-
+#define FREE_BLOCKS		   5
 int MOUNTED = 0;
-int *bitmap; 
+int BITMAP[FREE_BLOCKS]; 
 union fs_block BLOCK;
+
 const char *EMPTY; 
 
 struct fs_superblock {
@@ -40,62 +41,69 @@ union fs_block {
 };
 
 int fs_format() {
+
 	// check if the file system has already been mounted → return fail if already mounted
-	if (BLOCK.super.magic == FS_MAGIC) {  // Hanjing: I think we need to have this function in mount, not format why
-		return 0;  							// bc "format rountine places this FS_MAGIC into superblock" 
-	}										// "When the filesystem is mounted, the OS looks for this magic number."
-											// so the comparison of magic to FS_MAGIC is in mount
-											// yea so like when they are equal its mounted? if not it isnt 很有道理！
-	
+	if (BLOCK.super.magic == FS_MAGIC) { 
+		return 0;
+	}
+
+	int nblocks = disk_size();
+
 	// read superblock information
 	disk_read(0, BLOCK.data); 
-	
-	// create a new filesystem on disk
-	int nblocks = disk_size();
-	int ninodeblocks = 0.1 * nblocks; 
+
+	// set 10% of the blocks for inodes, needs to round up
+	int ninodeblocks = 0.1 * nblocks;
+
+	if (ninodeblocks == 0) {
+		ninodeblocks = 1;
+	}
 	// BLOCK.super.nblocks=disk_size();
 	printf("nblocks: %d\n", nblocks);
 
-	// destroy data already present
-	/*for (int i = 0; i < DISK_BLOCK_SIZE; i++) {
-		BLOCK.data[i] = 0;
-	}*/
-	// writing philo journal rn brb 你也去写 :))
-
-	// set 10% of the blocks for inodes, needs to round up
-	// BLOCK.inode.size = 0.1 * nblocks; // what is exactly this 10% thing for? 
-	
 	// clear the inode table
 	for(int j = 1; j <= ninodeblocks; j++) {
-		disk_write(j, EMPTY);
+		disk_write(j, "0x0");
 	}
 
+	struct fs_superblock super;
+	super.magic = FS_MAGIC;
+	super.nblocks = nblocks;
+	super.ninodeblocks = ninodeblocks; 
+	super.ninodes = INODES_PER_BLOCK * ninodeblocks;
+	BLOCK.super = super;
+
+	printf("%d\n", BLOCK.super.ninodeblocks);
 	// writes the superblock
-	BLOCK.super.magic = FS_MAGIC;
-	BLOCK.super.nblocks = nblocks;
-	BLOCK.super.ninodeblocks = ninodeblocks;
-	BLOCK.super.ninodes = INODE_PER_BLOCK * ninodeblocks;
+	// BLOCK.super.magic = FS_MAGIC;
+	// BLOCK.super.nblocks = nblocks;
+	// BLOCK.super.ninodeblocks = ninodeblocks;
+	// BLOCK.super.ninodes = INODES_PER_BLOCK * ninodeblocks;
+
 	disk_write(0, BLOCK.data);
+
 	return 1;
-
-
 }
 
 void fs_debug()
 {
-	union fs_block block;
-
-	disk_read(0,block.data);
+	disk_read(0, BLOCK.data);
 
 	printf("superblock:\n");
-	printf("    %d blocks\n",block.super.nblocks);
-	printf("    %d inode blocks\n",block.super.ninodeblocks);
-	printf("    %d inodes\n",block.super.ninodes);
+	printf("magic number: %d\n", BLOCK.super.magic);
+	printf("    %d blocks\n",BLOCK.super.nblocks);
+	printf("    %d inode blocks\n",BLOCK.super.ninodeblocks);
+	printf("    %d inodes\n",BLOCK.super.ninodes);
+
 }
 
 int fs_mount()
 {
-	return 0;
+	if (BLOCK.super.magic != FS_MAGIC) { 
+		return 0;
+	}
+
+	return 1;
 }
 
 int fs_create()
