@@ -65,7 +65,7 @@ int fs_format() {
 
 	// clear the inode table
 	for(int j = 1; j <= ninodeblocks; j++) {
-		for (int k = 0; k < INODES_PER_BLOCK; k++) {
+		for (int k = 1; k <= INODES_PER_BLOCK; k++) {
 			struct fs_inode inode;
 			inode.isvalid = 0;
 			// for testing
@@ -110,7 +110,7 @@ void fs_debug()
 	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
 
 		// read the inode block for data
-		for (int j = 0; j < INODES_PER_BLOCK; j++) {
+		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
 			struct fs_inode curr_inode = INODE_BLOCKS[i].inode[j];
 			int inumber = (i-1) * INODES_PER_BLOCK + j;
 			if (curr_inode.isvalid) {
@@ -142,6 +142,24 @@ int fs_mount()
 
 int fs_create()
 {
+	int inumber;
+	// inode information
+	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
+		// read the inode block for data
+		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
+			struct fs_inode curr_inode = INODE_BLOCKS[i].inode[j];
+			// create inode
+			if (!curr_inode.isvalid) {
+				inumber = (i-1) * INODES_PER_BLOCK + j;
+				struct fs_inode inode;
+				inode.isvalid = 1;
+				inode.size = 0;
+				INODE_BLOCKS[i].inode[j] = inode;
+
+				return inumber;
+			}
+		}
+	}
 	return 0;
 }
 
