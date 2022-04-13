@@ -12,6 +12,7 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
+#define MEM_SIZE 		   4000000
 
 int MOUNTED = 0;
 int *bitmap; 
@@ -19,6 +20,9 @@ union fs_block BLOCK;
 const char *EMPTY; 
 
 int isFILESYS = 0;
+int isMOUNTED = 0;
+
+int FB_BITMAP[MEM_SIZE];
 
 struct fs_superblock {
 	int magic;
@@ -61,9 +65,7 @@ int fs_format() {
 
 	// invalidate all inode bits 
 	for(int i = 1; i < ninodeblocks; i++) {
-		printf("inode block: %d\n", i);
 		union fs_block inode_block;
-		printf("inode block: %d\n", i);
 		for(int j = 0; j < INODES_PER_BLOCK; j++) {
 			inode_block.inode[j].isvalid = 0;
 		}
@@ -122,16 +124,19 @@ int fs_mount()
 	}
 
 	// read superblock
-	
-
-
 
 	// build free block bitmap & prepare filesystem for use
+	FB_BITMAP[0] = 1;
+	int in;
+	for(in = 1; in <= BLOCK.super.ninodeblocks; in++) {
+		FB_BITMAP[in] = 1;
+	}
+	for(int ib = in+1; ib < BLOCK.super.nblocks; ib++) { 
+		FB_BITMAP[ib] = 0;
+	}
 
-
-
-
-	return 0;
+	isMOUNTED = 1;
+	return 1;
 }
 
 int fs_create()
