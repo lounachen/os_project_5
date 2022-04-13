@@ -54,7 +54,7 @@ int fs_format() {
 	
 	// create a new filesystem on disk
 	int nblocks = disk_size();
-	int ninodeblocks = ( 0.1 * nblocks ) + 2; 
+	int ninodeblocks = ( 0.1 * nblocks ) + 1; 
 	// BLOCK.super.nblocks=disk_size();
 	printf("nblocks: %d\n", nblocks);
 	printf("ninodeblocks: %d\n", ninodeblocks);
@@ -69,7 +69,6 @@ int fs_format() {
 		}
 		disk_write(i, inode_block.data);
 	}
-	ninodeblocks -= 1;
 
 	// destroy data already present
 	/*for (int i = 0; i < DISK_BLOCK_SIZE; i++) {
