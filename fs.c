@@ -18,6 +18,8 @@ int *bitmap;
 union fs_block BLOCK;
 const char *EMPTY; 
 
+int isFILESYS = 0;
+
 struct fs_superblock {
 	int magic;
 	int nblocks;
@@ -52,30 +54,42 @@ int fs_format() {
 	
 	// create a new filesystem on disk
 	int nblocks = disk_size();
-	int ninodeblocks = 0.1 * nblocks; 
+	int ninodeblocks = ( 0.1 * nblocks ) + 2; 
 	// BLOCK.super.nblocks=disk_size();
 	printf("nblocks: %d\n", nblocks);
+	printf("ninodeblocks: %d\n", ninodeblocks);
+
+	// invalidate all inode bits 
+	for(int i = 1; i < ninodeblocks; i++) {
+		printf("inode block: %d\n", i);
+		union fs_block inode_block;
+		printf("inode block: %d\n", i);
+		for(int j = 0; j < INODES_PER_BLOCK; j++) {
+			inode_block.inode[j].isvalid = 0;
+		}
+		disk_write(i, inode_block.data);
+	}
+	ninodeblocks -= 1;
 
 	// destroy data already present
 	/*for (int i = 0; i < DISK_BLOCK_SIZE; i++) {
 		BLOCK.data[i] = 0;
 	}*/
 	// writing philo journal rn brb 你也去写 :))
-
-	// set 10% of the blocks for inodes, needs to round up
-	// BLOCK.inode.size = 0.1 * nblocks; // what is exactly this 10% thing for? 
 	
 	// clear the inode table
-	for(int j = 1; j <= ninodeblocks; j++) {
+	/*for(int j = 1; j <= ninodeblocks; j++) {
 		disk_write(j, EMPTY);
-	}
+	}*/
 
 	// writes the superblock
 	BLOCK.super.magic = FS_MAGIC;
 	BLOCK.super.nblocks = nblocks;
 	BLOCK.super.ninodeblocks = ninodeblocks;
-	BLOCK.super.ninodes = INODE_PER_BLOCK * ninodeblocks;
+	BLOCK.super.ninodes = INODES_PER_BLOCK * ninodeblocks;
 	disk_write(0, BLOCK.data);
+
+	isFILESYS = 1;
 	return 1;
 
 
@@ -83,18 +97,41 @@ int fs_format() {
 
 void fs_debug()
 {
-	union fs_block block;
-
-	disk_read(0,block.data);
-
 	printf("superblock:\n");
-	printf("    %d blocks\n",block.super.nblocks);
-	printf("    %d inode blocks\n",block.super.ninodeblocks);
-	printf("    %d inodes\n",block.super.ninodes);
+	if(BLOCK.super.magic == FS_MAGIC) {
+		printf("    magic number is valid\n");
+	} else {
+		printf("    magic number is invalid\n");
+	}
+	printf("    %d blocks on disk\n", BLOCK.super.nblocks);
+	printf("    %d blocks for inodes\n", BLOCK.super.ninodeblocks);
+	printf("    %d inodes total\n", BLOCK.super.ninodes);
+
+	/*printf("    %d blocks\n",BLOCK.super.nblocks);
+	printf("    %d inode blocks\n",BLOCK.super.ninodeblocks);
+	printf("    %d inodes\n",BLOCK.super.ninodes);*/
 }
 
 int fs_mount()
 {
+
+
+	// check if disk is present
+	if(!isFILESYS) {
+		printf("no filesystem found\n");
+		return 0;
+	}
+
+	// read superblock
+	
+
+
+
+	// build free block bitmap & prepare filesystem for use
+
+
+
+
 	return 0;
 }
 
