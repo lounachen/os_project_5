@@ -165,7 +165,19 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	return 0;
+	int j = inumber % INODES_PER_BLOCK;
+	int i = (inumber - j) / INODES_PER_BLOCK + 1;
+
+	// on failure, return 0
+	if (!INODE_BLOCKS[i].inode[j].isvalid) {
+		return 0;
+	}
+
+	struct fs_inode inode;
+	inode.isvalid = 0;
+	inode.size = 1;
+	INODE_BLOCKS[i].inode[j] = inode;
+	return 1;
 }
 
 int fs_getsize( int inumber )
