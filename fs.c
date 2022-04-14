@@ -36,6 +36,14 @@ union fs_block {
 
 int fs_format()
 {
+	union fs_block block;
+	block.super.nblocks=disk_size();
+	//int nblocks=disk_size();
+	printf("nblocks: %d\n", nblocks);
+
+	//set 10% of the blocks for inodes
+	block.inode.size=0.1*nblocks;
+
 	return 0;
 }
 
