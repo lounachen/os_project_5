@@ -14,6 +14,7 @@
 #define MEM_SET			   4000
 
 int MOUNTED = 0;
+int FORMATTED = 0;
 int BITMAP[MEM_SET]; 
 
 struct fs_superblock {
@@ -64,7 +65,6 @@ int fs_format() {
 		union fs_block curr_block;
 		disk_read(j, curr_block.data);
 		for (int k = 1; k <= INODES_PER_BLOCK; k++) {
-			//struct fs_inode curr_inode;
 			curr_block.inode[k].isvalid = 0;
 			// for testing
 			if ((j == 1) && (k == 2)) {
@@ -88,6 +88,7 @@ int fs_format() {
 
 	disk_write(0, SUPER_BLOCK.data);
 
+	FORMATTED = 1;
 	return 1;
 }
 
@@ -122,6 +123,9 @@ void fs_debug()
 
 int fs_mount()
 {
+	if(!FORMATTED) {
+		return 0;
+	}
 	if (SUPER_BLOCK.super.magic != FS_MAGIC) { 
 		return 0;
 	}
@@ -136,11 +140,16 @@ int fs_mount()
 	for (int ib = SUPER_BLOCK.super.ninodeblocks + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
 		BITMAP[ib] = 0;
 	}
+
+	MOUNTED = 1;
 	return 1;
 }
 
 int fs_create()
 {
+	if(!MOUNTED || !FORMATTED) {
+		return 0;
+	}
 	int inumber;
 	// inode information
 	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
@@ -149,7 +158,6 @@ int fs_create()
 		disk_read(i, curr_block.data);
 		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
 			struct fs_inode curr_inode = curr_block.inode[j];
-			printf("validity of inode %d: %d\n", j, curr_inode.isvalid);
 			// create inode
 			if (!curr_inode.isvalid) {
 				inumber = (i-1) * INODES_PER_BLOCK + j;
@@ -167,6 +175,9 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
+	if(!MOUNTED || !FORMATTED) {
+		return 0;
+	}
 	int inode_in_block = inumber % INODES_PER_BLOCK;
 	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
 
@@ -185,6 +196,9 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
+	if(!MOUNTED || !FORMATTED) {
+		return 0;
+	}
 	int inode_in_block = inumber % INODES_PER_BLOCK;
 	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
 
@@ -202,10 +216,41 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
+	if(!MOUNTED || !FORMATTED) {
+		return 0;
+	}
+
 	return 0;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+
+	if(!MOUNTED || !FORMATTED) {
+		return 0;
+	}
+	/* Write data to a valid inode. 
+	Allocate any necessary direct and indirect blocks in the process. 
+	Return the number of bytes actually written. 
+	The number of bytes actually written could be smaller 
+	than the number of bytes request, perhaps if the disk becomes full. 
+	If the given inumber is invalid, or any other error is encountered, return 0.*/
+
+
+	int inode_in_block = inumber % INODES_PER_BLOCK;
+	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
+
+	union fs_block iblock;
+	disk_read(block, iblock.data);
+
+	// if the given inumber is invalid, return 0
+	if(!iblock.inode[inode_in_block].isvalid) {
+		return -1;
+	}
+
+	// check if length is less than a block size 
+
+
+
 	return 0;
 }
