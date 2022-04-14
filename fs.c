@@ -38,9 +38,6 @@ union fs_block {
 };
 
 union fs_block SUPER_BLOCK;
-union fs_block INODE_BLOCKS[MEM_SET];
-
-
 
 int fs_format() {
 
@@ -64,20 +61,21 @@ int fs_format() {
 
 	// clear the inode table, write null characters to every single block & byte
 	for(int j = 1; j <= ninodeblocks; j++) {
+		union fs_block curr_block;
+		disk_read(j, curr_block.data);
 		for (int k = 1; k <= INODES_PER_BLOCK; k++) {
-			struct fs_inode inode;
-			inode.isvalid = 0;
+			//struct fs_inode curr_inode;
+			curr_block.inode[k].isvalid = 0;
 			// for testing
 			if ((j == 1) && (k == 2)) {
-				inode.isvalid = 1;
-				inode.size = 52;
+				curr_block.inode[k].isvalid = 1;
+				curr_block.inode[k].size = 52;
 			}
 			if ((j == 2) && (k == 2)) {
-				inode.isvalid = 1;
-				inode.size = 67;
+				curr_block.inode[k].isvalid = 1;
+				curr_block.inode[k].size = 67;
 			}
-			INODE_BLOCKS[j].inode[k] = inode;
-			disk_write(j, INODE_BLOCKS[j].data);
+			disk_write(j, curr_block.data);
 		}
 	}
 
@@ -108,10 +106,11 @@ void fs_debug()
 
 	// inode information
 	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
-
+		union fs_block curr_block;
+		disk_read(i, curr_block.data);
 		// read the inode block for data
 		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
-			struct fs_inode curr_inode = INODE_BLOCKS[i].inode[j];
+			struct fs_inode curr_inode = curr_block.inode[j];
 			int inumber = (i-1) * INODES_PER_BLOCK + j;
 			if (curr_inode.isvalid) {
 				printf("inode %d:\n", inumber);
@@ -146,16 +145,19 @@ int fs_create()
 	// inode information
 	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
 		// read the inode block for data
+		union fs_block curr_block;
+		disk_read(i, curr_block.data);
 		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
-			struct fs_inode curr_inode = INODE_BLOCKS[i].inode[j];
+			struct fs_inode curr_inode = curr_block.inode[j];
+			printf("validity of inode %d: %d\n", j, curr_inode.isvalid);
 			// create inode
 			if (!curr_inode.isvalid) {
 				inumber = (i-1) * INODES_PER_BLOCK + j;
 				struct fs_inode inode;
 				inode.isvalid = 1;
 				inode.size = 0;
-				INODE_BLOCKS[i].inode[j] = inode;
-				disk_write(i, INODE_BLOCKS[i].data);
+				curr_block.inode[j] = inode;
+				disk_write(i, curr_block.data);
 				return inumber;
 			}
 		}
@@ -165,18 +167,19 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	int j = inumber % INODES_PER_BLOCK;
-	int i = (inumber - j) / INODES_PER_BLOCK + 1;
+	int inode_in_block = inumber % INODES_PER_BLOCK;
+	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
 
-	// on failure, return 0
-	if (!INODE_BLOCKS[i].inode[j].isvalid) {
+	union fs_block inode_block;
+	disk_read(block, inode_block.data);
+
+	// fail if inode is invalid
+	if(!inode_block.inode[inode_in_block].isvalid) {
 		return 0;
 	}
 
-	struct fs_inode inode;
-	inode.isvalid = 0;
-	inode.size = 1;
-	INODE_BLOCKS[i].inode[j] = inode;
+	inode_block.inode[inode_in_block].isvalid = 0;
+	inode_block.inode[inode_in_block].size = 1;
 	return 1;
 }
 
