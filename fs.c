@@ -53,12 +53,7 @@ int fs_format() {
 	disk_read(0, SUPER_BLOCK.data); 
 
 	// set 10% of the blocks for inodes, needs to round up
-	int ninodeblocks = 0.1 * nblocks;
-	double check_num = 0.1 * (double) nblocks;
-
-	if (ninodeblocks != check_num) {
-		ninodeblocks += 1;
-	}
+	int ninodeblocks = 0.1 * nblocks + 1;
 
 	// clear the inode table, write null characters to every single block & byte
 	for(int j = 1; j <= ninodeblocks; j++) {
@@ -103,7 +98,7 @@ void fs_debug()
 	}
 	printf("    %d blocks on disk\n",SUPER_BLOCK.super.nblocks);
 	printf("    %d blocks for inodes\n",SUPER_BLOCK.super.ninodeblocks);
-	printf("    %d inodes total\n",SUPER_BLOCK.super.ninodes);
+	printf("    %d inodes\n",SUPER_BLOCK.super.ninodes);
 
 	// inode information
 	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
