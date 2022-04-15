@@ -12,6 +12,7 @@
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
 #define MEM_SET			   400000
+#define MAX_OFFSET         4214784
 
 int MOUNTED = 0;
 int FORMATTED = 0;
@@ -66,6 +67,7 @@ int fs_format() {
 		disk_read(j, curr_block.data);
 		for (int k = 1; k <= INODES_PER_BLOCK; k++) {
 			curr_block.inode[k].isvalid = 0;
+			curr_block.inode[k].indirect = -1;
 			int data_pointers[POINTERS_PER_BLOCK];
 			for (int l = 0; l < POINTERS_PER_INODE; l++) {
 				data_pointers[l] = -1;
@@ -185,8 +187,6 @@ int fs_create()
 				inode.size = 0;
 				curr_block.inode[j] = inode;
 				disk_write(i, curr_block.data);
-				// update bitmap
-				BITMAP[SUPER_BLOCK.super.ninodeblocks+inumber] = 1;
 				return inumber;
 			}
 		}
@@ -260,6 +260,15 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	than the number of bytes request, perhaps if the disk becomes full. 
 	If the given inumber is invalid, or any other error is encountered, return 0.*/
 
+	// if string is empty, return 0
+	if (length == 0) {
+		return 0;
+	}
+
+	// if offset exceeds block size, return 0
+	if (offset >= MAX_OFFSET) {
+		return 0;
+	}
 
 	int inode_in_block = inumber % INODES_PER_BLOCK;
 	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
@@ -272,9 +281,183 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		return -1;
 	}
 
-	// check if length is less than a block size 
+	int ib;
+	int curr_bit = -1;
+	int blocks_needed;
+
+	/* Prepare for writing */
+
+	// Find free bit in bitmap
+	for (ib = SUPER_BLOCK.super.ninodeblocks + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
+		if (BITMAP[ib] == 0) {
+			curr_bit = ib;
+			break;
+		}
+	}
+
+	// no free bit, return 0
+	if (curr_bit == -1) {
+		return 0;
+	}
+
+	int curr_in_indirect;
+	int offset_in_inode = offset / 4096;
+	// direct block of inode
+	if (offset_in_inode < 5) {
+		// set pointer
+		iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
+	} else {
+		union fs_block indirect_block;
+		// if no indirect block allocated, allocate; else, read indirect block
+		if (iblock.inode[inode_in_block].indirect != -1) {
+			// make indirect block
+			iblock.inode[inode_in_block].indirect = curr_bit;
+			disk_read(curr_bit, indirect_block.data);
+
+			int indirect_pointers[POINTERS_PER_BLOCK];
+
+			for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
+				indirect_pointers[i] = -1;
+				indirect_block.pointers[i] = indirect_pointers[i];
+			}
+
+			disk_write(curr_bit, indirect_block.data);
+
+			int used_bit = curr_bit;
+			// Find free bit in bitmap
+			for (ib = curr_bit + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
+				if (BITMAP[ib] == 0) {
+					curr_bit = ib;
+					break;
+				}
+			}
+
+			// no free bit, return 0
+			if (curr_bit == used_bit) {
+				return 0;
+			}
+
+			// link the first direct block to indirect block
+			indirect_block.pointers[0] = curr_bit;
+		} else {
+			disk_read(iblock.inode[inode_in_block].indirect, indirect_block.data);
 
 
 
-	return 0;
+			for (curr_in_indirect = 0; curr_in_indirect < POINTERS_PER_BLOCK; curr_in_indirect++) {
+				if (indirect_block.pointers[curr_in_indirect] == -1) {
+					break;
+				}
+			}
+
+			// link the empty direct block to indirect block
+			indirect_block.pointers[curr_in_indirect] = curr_bit;
+		}
+	}
+	offset_in_inode += 1;
+
+	offset = offset % 4096;
+	union fs_block direct_block;
+	disk_read(curr_bit, direct_block.data);
+
+	char * r_data = data;
+
+	int actual_written = 0;
+
+	while (offset + length) {
+		// check if lengtht + offset is less than a block size 
+		if (length <= DISK_BLOCK_SIZE - offset) {
+			char temp[length];
+			snprintf(temp, length, "%s", r_data);
+			memcpy(&direct_block.data[offset], temp, strlen(temp));
+
+			// write to disk
+			disk_write(curr_bit, direct_block.data);
+
+			iblock.inode[inode_in_block].size += length;
+			actual_written += length;
+			// update size
+			disk_write(block, iblock.data);
+
+			offset = 0;
+			length = 0;
+		// length exceeds a block 
+		} else {
+			char temp[DISK_BLOCK_SIZE - offset];
+			snprintf(temp, DISK_BLOCK_SIZE - offset, "%s", r_data);
+			memcpy(&direct_block.data[offset], temp, strlen(temp));
+
+			memcpy(r_data, &data[offset], length - DISK_BLOCK_SIZE + offset);
+			// write to disk
+			disk_write(curr_bit, direct_block.data);
+
+			iblock.inode[inode_in_block].size += DISK_BLOCK_SIZE - offset;
+			actual_written += DISK_BLOCK_SIZE - offset;
+			// update size
+			disk_write(block, iblock.data);
+
+			// find new space for data block
+			int used_bit = curr_bit;
+
+			// Find free bit in bitmap
+			for (ib = curr_bit + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
+				if (BITMAP[ib] == 0) {
+					curr_bit = ib;
+					break;
+				}
+			}
+
+			// no free bit, return 0
+			if (curr_bit == used_bit) {
+				return actual_written;
+			}
+
+			if (offset_in_inode < 5) {
+				// set pointer
+				iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
+			} else if (offset_in_inode == 5) {
+				// have to allocate indirect block
+				union fs_block indirect_block;
+				// make indirect block
+				iblock.inode[inode_in_block].indirect = curr_bit;
+				disk_read(curr_bit, indirect_block.data);
+
+				int indirect_pointers[POINTERS_PER_BLOCK];
+
+				for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
+					indirect_pointers[i] = -1;
+					indirect_block.pointers[i] = indirect_pointers[i];
+				}
+
+				disk_write(curr_bit, indirect_block.data);
+
+				int used_bit = curr_bit;
+				// Find free bit in bitmap
+				for (ib = curr_bit + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
+					if (BITMAP[ib] == 0) {
+						curr_bit = ib;
+						break;
+					}
+				}
+
+				// no free bit, return 0
+				if (curr_bit == used_bit) {
+					return 0;
+				}
+
+				// link the first direct block to indirect block
+				indirect_block.pointers[0] = curr_bit;
+			} else {
+				curr_in_indirect += 1;
+				union fs_block indirect_block;
+				disk_read(iblock.inode[inode_in_block].indirect, indirect_block.data);
+				indirect_block.pointers
+				[curr_in_indirect] = curr_bit;
+			}
+			offset_in_inode += 1;
+			offset = 0;
+			length = length - (DISK_BLOCK_SIZE - offset);
+		}
+	}
+	return actual_written;
 }
