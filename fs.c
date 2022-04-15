@@ -1,3 +1,4 @@
+
 #include "fs.h"
 #include "disk.h"
 
@@ -11,11 +12,17 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
-#define MEM_SET			   4000
+#define MEM_SIZE 		   4000000
 
 int MOUNTED = 0;
-int FORMATTED = 0;
-int BITMAP[MEM_SET]; 
+int *bitmap; 
+union fs_block BLOCK;
+const char *EMPTY[DISK_BLOCK_SIZE]; 
+
+int isFILESYS = 0;
+int isMOUNTED = 0;
+
+int FB_BITMAP[MEM_SIZE];
 
 struct fs_superblock {
 	int magic;
@@ -38,219 +45,175 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
-union fs_block SUPER_BLOCK;
-
 int fs_format() {
-
 	// check if the file system has already been mounted → return fail if already mounted
-	if (SUPER_BLOCK.super.magic == FS_MAGIC) { 
-		return 0;
-	}
-
-	int nblocks = disk_size();
-
+	if (BLOCK.super.magic == FS_MAGIC) {  
+		return 0;  							
+	}										
 	// read superblock information
-	disk_read(0, SUPER_BLOCK.data); 
+	disk_read(0, BLOCK.data); 
+	
+	// create a new filesystem on disk
+	int nblocks = disk_size();
+	int ninodeblocks = ( 0.1 * nblocks ) + 1; 
+	// BLOCK.super.nblocks=disk_size();
+	printf("nblocks: %d\n", nblocks);
+	printf("ninodeblocks: %d\n", ninodeblocks);
 
-	// set 10% of the blocks for inodes, needs to round up
-	int ninodeblocks = 0.1 * nblocks;
-	double check_num = 0.1 * (double) nblocks;
-
-	if (ninodeblocks != check_num) {
-		ninodeblocks += 1;
-	}
-
-	// clear the inode table, write null characters to every single block & byte
-	for(int j = 1; j <= ninodeblocks; j++) {
-		union fs_block curr_block;
-		disk_read(j, curr_block.data);
-		for (int k = 1; k <= INODES_PER_BLOCK; k++) {
-			curr_block.inode[k].isvalid = 0;
-			// for testing
-			if ((j == 1) && (k == 2)) {
-				curr_block.inode[k].isvalid = 1;
-				curr_block.inode[k].size = 52;
-			}
-			if ((j == 2) && (k == 2)) {
-				curr_block.inode[k].isvalid = 1;
-				curr_block.inode[k].size = 67;
-			}
-			disk_write(j, curr_block.data);
+	// invalidate all inode bits 
+	for(int i = 1; i < ninodeblocks; i++) {
+		union fs_block inode_block;
+		for(int j = 0; j < INODES_PER_BLOCK; j++) {
+			inode_block.inode[j].isvalid = 0;
 		}
+		disk_write(i, inode_block.data);
 	}
 
-	struct fs_superblock super;
-	super.magic = FS_MAGIC;
-	super.nblocks = nblocks;
-	super.ninodeblocks = ninodeblocks; 
-	super.ninodes = INODES_PER_BLOCK * ninodeblocks;
-	SUPER_BLOCK.super = super;
+	// destroy data already present
+	/*for (int i = 0; i < DISK_BLOCK_SIZE; i++) {
+		BLOCK.data[i] = 0;
+	}*/
+	// writing philo journal rn brb 你也去写 :))
+	
 
-	disk_write(0, SUPER_BLOCK.data);
+	// writes the superblock
+	BLOCK.super.magic = FS_MAGIC;
+	BLOCK.super.nblocks = nblocks;
+	BLOCK.super.ninodeblocks = ninodeblocks;
+	BLOCK.super.ninodes = INODES_PER_BLOCK * ninodeblocks;
+	disk_write(0, BLOCK.data);
 
-	FORMATTED = 1;
+	isFILESYS = 1;
 	return 1;
+
+
 }
 
 void fs_debug()
 {
-
+	disk_read(0, BLOCK.data);
 	printf("superblock:\n");
-	if(SUPER_BLOCK.super.magic == FS_MAGIC) {
+	if(BLOCK.super.magic == FS_MAGIC) {
 		printf("    magic number is valid\n");
 	} else {
 		printf("    magic number is invalid\n");
 	}
-	printf("    %d blocks on disk\n",SUPER_BLOCK.super.nblocks);
-	printf("    %d blocks for inodes\n",SUPER_BLOCK.super.ninodeblocks);
-	printf("    %d inodes total\n",SUPER_BLOCK.super.ninodes);
+	printf("    %d blocks on disk\n", BLOCK.super.nblocks);
+	printf("    %d blocks for inodes\n", BLOCK.super.ninodeblocks);
+	printf("    %d inodes total\n", BLOCK.super.ninodes);
 
-	// inode information
-	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
-		union fs_block curr_block;
-		disk_read(i, curr_block.data);
-		// read the inode block for data
-		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
-			struct fs_inode curr_inode = curr_block.inode[j];
+	// check inode block
+	for (int i = 1; i <= BLOCK.super.ninodeblocks; i++){
+		disk_read(i, BLOCK.data);
+
+		for (int j = 0; j < INODES_PER_BLOCK; j++){
+			// if not valid
+			if (!BLOCK.inode[j].isvalid) continue;
+
 			int inumber = (i-1) * INODES_PER_BLOCK + j;
-			if (curr_inode.isvalid) {
-				printf("inode %d:\n", inumber);
-				printf("    size: %d bytes\n", curr_inode.size);
+			// get current inode
+			struct fs_inode curr_inode = BLOCK.inode[j];
+			printf("inode %d:\n", inumber);
+			printf("\t size: %d bytes\n", curr_inode.size);
+
+			// check for direct block
+			if (memcmp(EMPTY, curr_inode.direct, POINTERS_PER_INODE)){
+				printf("\tdirect blocks:");
+				for (int k = 0; k < POINTERS_PER_INODE; k++){
+					if (curr_inode.direct[k]) printf(" %d", curr_inode.direct[k]);
+				}
+				printf("\n");
+			}
+
+			// check for indirect block
+			if (curr_inode.indirect){
+				printf("\tindirect block: %d\n", curr_inode.indirect);
+
+				// read the pointed block
+				union fs_block pointed_block;
+				disk_read(curr_inode.indirect, pointed_block.data);
+
+				if (memcmp (EMPTY, pointed_block.pointers, POINTERS_PER_BLOCK)){
+					printf("\t indirect data blocks:");
+					for (int k = 0; k < POINTERS_PER_BLOCK; k++){
+						if (pointed_block.pointers[k]) printf(" %d", pointed_block.pointers[k]);
+					}
+					printf("\n");
+				}
 			}
 		}
 	}
+	return;
 }
 
 int fs_mount()
 {
-	if(!FORMATTED) {
+
+
+	// check if disk is present
+	if(!isFILESYS) {
+		printf("no filesystem found\n");
 		return 0;
 	}
-	if (SUPER_BLOCK.super.magic != FS_MAGIC) { 
-		return 0;
+
+	// read superblock
+
+	// build free block bitmap & prepare filesystem for use
+	FB_BITMAP[0] = 1;
+	int in;
+	for(in = 1; in <= BLOCK.super.ninodeblocks; in++) {
+		FB_BITMAP[in] = 1;
+	}
+	for(int ib = in+1; ib < BLOCK.super.nblocks; ib++) { 
+		FB_BITMAP[ib] = 0;
 	}
 
-	// build free block bitmap & prepare fs for use
-	BITMAP[0] = 1;
-
-	for (int in = 1; in <= SUPER_BLOCK.super.ninodeblocks; in++) {
-		BITMAP[in] = 1;
-	}
-
-	for (int ib = SUPER_BLOCK.super.ninodeblocks + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
-		BITMAP[ib] = 0;
-	}
-
-	MOUNTED = 1;
+	isMOUNTED = 1;
 	return 1;
 }
 
 int fs_create()
 {
-	if(!MOUNTED || !FORMATTED) {
-		return 0;
+	// check inode
+	for (int i = 1; i < BLOCK.super.ninodes; i++){
+		int block_number = i / INODES_PER_BLOCK + 1;
+		int offset = i % INODES_PER_BLOCK;
+		// read the block with the curr_inode
+		disk_read(block_number, BLOCK.data);
+
+		// load the inode
+		struct fs_inode curr_inode;
+		curr_inode = BLOCK.inode[offset];
+
+		// if the curr_inode is valid
+		if (curr_inode.isvalid) continue;
+		
+		// initialize
+		memset(&curr_inode, 0, sizeof(struct fs_inode));
+		curr_inode.isvalid = 1;
+
+		return i;
 	}
-	int inumber;
-	// inode information
-	for (int i = 1; i <= SUPER_BLOCK.super.ninodeblocks; i++) {
-		// read the inode block for data
-		union fs_block curr_block;
-		disk_read(i, curr_block.data);
-		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
-			struct fs_inode curr_inode = curr_block.inode[j];
-			// create inode
-			if (!curr_inode.isvalid) {
-				inumber = (i-1) * INODES_PER_BLOCK + j;
-				struct fs_inode inode;
-				inode.isvalid = 1;
-				inode.size = 0;
-				curr_block.inode[j] = inode;
-				disk_write(i, curr_block.data);
-				return inumber;
-			}
-		}
-	}
+	printf("Error creating new inode\n");
 	return 0;
 }
 
 int fs_delete( int inumber )
 {
-	if(!MOUNTED || !FORMATTED) {
-		return 0;
-	}
-	int inode_in_block = inumber % INODES_PER_BLOCK;
-	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
-
-	union fs_block inode_block;
-	disk_read(block, inode_block.data);
-
-	// fail if inode is invalid
-	if(!inode_block.inode[inode_in_block].isvalid) {
-		return 0;
-	}
-
-	inode_block.inode[inode_in_block].isvalid = 0;
-	inode_block.inode[inode_in_block].size = 1;
-	return 1;
+	return 0;
 }
 
 int fs_getsize( int inumber )
 {
-	if(!MOUNTED || !FORMATTED) {
-		return 0;
-	}
-	int inode_in_block = inumber % INODES_PER_BLOCK;
-	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
-
-	union fs_block inode_block;
-	disk_read(block, inode_block.data);
-	
-	// fail if inode is invalid
-	if(!inode_block.inode[inode_in_block].isvalid) {
-		return -1;
-	}
-
-	int size = inode_block.inode[inode_in_block].size;
-	return size;
+	return -1;
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	if(!MOUNTED || !FORMATTED) {
-		return 0;
-	}
-
 	return 0;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
-
-	if(!MOUNTED || !FORMATTED) {
-		return 0;
-	}
-	/* Write data to a valid inode. 
-	Allocate any necessary direct and indirect blocks in the process. 
-	Return the number of bytes actually written. 
-	The number of bytes actually written could be smaller 
-	than the number of bytes request, perhaps if the disk becomes full. 
-	If the given inumber is invalid, or any other error is encountered, return 0.*/
-
-
-	int inode_in_block = inumber % INODES_PER_BLOCK;
-	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
-
-	union fs_block iblock;
-	disk_read(block, iblock.data);
-
-	// if the given inumber is invalid, return 0
-	if(!iblock.inode[inode_in_block].isvalid) {
-		return -1;
-	}
-
-	// check if length is less than a block size 
-
-
-
 	return 0;
 }
