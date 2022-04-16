@@ -41,6 +41,30 @@ union fs_block {
 
 union fs_block SUPER_BLOCK;
 
+void inode_load( int inumber, struct fs_inode *inode ) {
+	int block_number = inumber / INODES_PER_BLOCK + 1;
+	int offset = inumber % INODES_PER_BLOCK;
+
+	union fs_block block;
+	disk_read(block_number, block.data);
+	// load inode
+	*inode = block.inode[offset];
+	return;
+}
+
+void inode_save( int inumber, struct fs_inode *inode ) {
+	int block_number = inumber / INODES_PER_BLOCK + 1;
+	int offset = inumber % INODES_PER_BLOCK;
+
+	union fs_block block;
+	disk_read(block_number, block.data);
+	// save inode
+	block.inode[offset] = *inode;
+	// write back
+	disk_write(block_number, block.data);
+	return;
+}
+
 int fs_format() {
 
 	// check if the file system has already been mounted → return fail if already mounted
@@ -223,24 +247,46 @@ int fs_getsize( int inumber )
 	if(!MOUNTED || !FORMATTED) {
 		return 0;
 	}
+
+	struct fs_inode curr_inode;
+	inode_load(inumber, &curr_inode);
+	/*
 	int inode_in_block = inumber % INODES_PER_BLOCK;
 	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
 
 	union fs_block inode_block;
 	disk_read(block, inode_block.data);
-	
+	*/
 	// fail if inode is invalid
-	if(inode_block.inode[inode_in_block].isvalid != 1) {
+	if(!curr_inode.isvalid) {
 		return -1;
 	}
 
-	int size = inode_block.inode[inode_in_block].size;
+	int size = curr_inode.size;
 	return size;
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
 	if(!MOUNTED || !FORMATTED) {
+		return 0;
+	}
+
+	struct fs_inode curr_inode;
+	inode_load(inumber, &curr_inode);
+
+	if (length == 0) {
+		fprintf(stderr, "Error: Read 0 byte\n");
+		return 0;
+	}
+
+	if (curr_inode.isvalid == 0) {
+		fprintf(stderr, "Error: Inode %d is not valid\n", inumber);
+		return 0;
+	}
+
+	if (offset > curr_inode.size){
+		fprintf(stderr, "Error: Offset is larger than size\n");
 		return 0;
 	}
 
