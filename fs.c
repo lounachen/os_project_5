@@ -280,21 +280,70 @@ int fs_read( int inumber, char *data, int length, int offset )
 		return 0;
 	}
 
+	// if the given inumber is invalid, return 0
 	if (curr_inode.isvalid == 0) {
 		fprintf(stderr, "Error: Inode %d is not valid\n", inumber);
 		return 0;
 	}
 
-	if (offset > curr_inode.size){
-		fprintf(stderr, "Error: Offset is larger than size\n");
+	if (offset > curr_inode.size) {
+		fprintf(stderr, "Error: Offset is too large\n");
 		return 0;
 	}
 
-	int a
+	// check if bytes read will exceed inode's size
+	// if yes, adjust the length
+	if (offset + length > curr_inode.size) {
+		length = curr_inode.size - offset;
+	}
 
-	int offset_in_inode = offset / DISK_BLOCK_SIZE;
+	int actual_read = 0;
+	int block_in_inode = offset / DISK_BLOCK_SIZE; // same with offset_in_inode in fs_write
+	int offset_in_block = offset % DISK_BLOCK_SIZE;
 
-	return 0;
+	while (block_in_inode < POINTERS_PER_INODE && length) {
+		union fs_block block;
+		disk_read(curr_inode.direct[block_in_inode], block.data);
+
+		// calculate the size of read
+		// cut short if the bytes going to read exceed the block size
+		int read_byte = (offset_in_block + length > DISK_BLOCK_SIZE)
+						?(DISK_BLOCK_SIZE - offset_in_block) 
+						: (length - offset_in_block);
+		
+		// copy the bytes from inode to the data pointer
+		memcpy(data+read_byte, block.data+offset_in_block, read_byte);
+		actual_read += read_byte;
+		length -= read_byte;
+		offset_in_block = 0;
+		block_in_inode++;
+	}
+
+	// if all we used is direct pointers
+	if (!length) return actual_read;
+
+	// if we need to read indirect pointer
+	union fs_block indirect_pointer;
+	disk_read(curr_inode.indirect, indirect_pointer.data);
+	block_in_inode -= POINTERS_PER_INODE;
+
+	// read from indirect block's pointer
+	while (length) {
+		union fs_block block;
+		disk_read(indirect_pointer.pointers[block_in_inode], block.data);
+		int read_byte = (offset_in_block + length > DISK_BLOCK_SIZE)
+						?(DISK_BLOCK_SIZE - offset_in_block) 
+						: (length - offset_in_block);
+		// copy the bytes from inode to the data pointer
+		memcpy(data+read_byte, block.data+offset_in_block, read_byte);
+		
+		actual_read += read_byte;
+		length -= read_byte;
+		offset_in_block = 0;
+		block_in_inode++;
+	}
+
+	return actual_read;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
