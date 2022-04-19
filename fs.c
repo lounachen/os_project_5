@@ -15,7 +15,6 @@
 #define MAX_OFFSET         4214784
 
 int MOUNTED = 0;
-int FORMATTED = 0;
 int BITMAP[MEM_SET]; 
 
 struct fs_superblock {
@@ -85,23 +84,17 @@ int fs_format() {
 		ninodeblocks += 1;
 	}
 
-	// clear the inode table, write null characters to every single block & byte
+	// clear the inode table, write null characters (0) to every single block & byte
 	for(int j = 1; j <= ninodeblocks; j++) {
 		union fs_block curr_block;
 		disk_read(j, curr_block.data);
 		for (int k = 1; k <= INODES_PER_BLOCK; k++) {
 			curr_block.inode[k].isvalid = 0;
-			curr_block.inode[k].indirect = -1;
+			curr_block.inode[k].indirect = 0;
 			int data_pointers[POINTERS_PER_BLOCK];
 			for (int l = 0; l < POINTERS_PER_INODE; l++) {
-				data_pointers[l] = -1;
+				data_pointers[l] = 0;
 				curr_block.inode[k].direct[l] = data_pointers[l];
-			}
-			if ((j == 2) && (k == 2)) {
-				curr_block.inode[k].isvalid = 1;
-				curr_block.inode[k].size = 67;
-				curr_block.inode[k].direct[0] = 123;
-				curr_block.inode[k].direct[1] = 134;
 			}
 		}
 		disk_write(j, curr_block.data);
@@ -116,7 +109,6 @@ int fs_format() {
 
 	disk_write(0, SUPER_BLOCK.data);
 
-	FORMATTED = 1;
 	return 1;
 }
 
@@ -139,60 +131,94 @@ void fs_debug()
 		// read the inode block for data
 		for (int j = 1; j <= INODES_PER_BLOCK; j++) {
 			struct fs_inode curr_inode = curr_block.inode[j];
-			int inumber = (i-1) * INODES_PER_BLOCK + j;
+			int inumber = (i-1) * INODES_PER_BLOCK + j; // calculate inode # based on placement in block
 			if (curr_inode.isvalid == 1) {
 				printf("inode %d:\n", inumber);
 				printf("    size: %d bytes\n", curr_inode.size);
 				if (curr_inode.size) {
-					const char * space = " ";
-					char direct_concat[MEM_SET];
-
+					printf("    direct blocks: ");
 					for (int k = 0; k < POINTERS_PER_INODE; k++) {
-						if (curr_block.inode[j].direct[k] != -1) {
-							char cstr[MEM_SET];
-							sprintf(cstr, "%d", curr_block.inode[j].direct[k]);
-							// concatenate direct blocks
-							const char * src = cstr;
+						if (curr_block.inode[j].direct[k] != 0) {
 							if (k > 0) {
-								strcat(direct_concat, space);
+								printf(" ");
 							}
-							strcat(direct_concat, src);
+							printf("%d", curr_block.inode[j].direct[k]);
 						}
 					}
-					printf("    direct blocks: %s\n", direct_concat);
+					printf("\n");
+					if(curr_block.inode[j].indirect != 0) {
+						printf("    indirect block: %d\n", curr_block.inode[j].indirect);
+						union fs_block indirect_block;
+						disk_read(curr_block.inode[j].indirect, indirect_block.data);
+						printf("    indirect data blocks: ");
+						for (int data = 0; data < POINTERS_PER_INODE; data++) {
+							if(indirect_block.pointers[data]) {
+								printf(" %d", indirect_block.pointers[data]);
+							}
+						}
+						printf("\n");
+					}
 				}
 			}
 		}
 	}
+	for(int i = 0; i < SUPER_BLOCK.super.nblocks; i++) {
+		printf("%d ", BITMAP[i]);
+	}
+	printf("\n");
 }
 
+// build free block bitmap & prepare fs for use
 int fs_mount()
 {
-	if(!FORMATTED) {
-		return 0;
-	}
+	disk_read(0, SUPER_BLOCK.data); 
+	//printf("ninodeblocks: %d\n", SUPER_BLOCK.super.ninodeblocks);
 	if (SUPER_BLOCK.super.magic != FS_MAGIC) { 
 		return 0;
 	}
 
-	// build free block bitmap & prepare fs for use
+	// set superblock to 1 in bitmap
 	BITMAP[0] = 1;
 
-	for (int in = 1; in <= SUPER_BLOCK.super.ninodeblocks; in++) {
-		BITMAP[in] = 1;
-	}
-
-	for (int ib = SUPER_BLOCK.super.ninodeblocks + 1; ib < SUPER_BLOCK.super.ninodeblocks; ib++) {
+	// clear data bitmap
+	for (int ib = SUPER_BLOCK.super.ninodeblocks + 1; ib < SUPER_BLOCK.super.ninodes; ib++) {
 		BITMAP[ib] = 0;
 	}
 
-	MOUNTED = 1;
+	for (int in = 1; in <= SUPER_BLOCK.super.ninodeblocks; in++) {
+		union fs_block inode_block;
+		disk_read(in, inode_block.data);
+		// check inodes for existing data & update bitmap accordingly
+		for(int ifdata = 0; ifdata < INODES_PER_BLOCK; ifdata++) {
+			if(inode_block.inode[ifdata].isvalid) {
+				// check for direct data
+				int endofdata = 0;
+				for (int data = 0; data < POINTERS_PER_INODE; data++) {
+					if (inode_block.inode[ifdata].direct[data] > 0) {
+						BITMAP[inode_block.inode[ifdata].direct[data]] = 1;
+					} 
+				}
+				// check for indirect data
+				if((inode_block.inode[ifdata].indirect > 0) ) {
+					BITMAP[inode_block.inode[ifdata].indirect] = 1;
+					for(int data = 0; data < POINTERS_PER_INODE; data++) {
+						if (inode_block.inode[ifdata].direct[data] != 0) {
+							BITMAP[inode_block.inode[ifdata].direct[data]] = 1;
+						}
+					}
+				}
+			}
+		}
+		BITMAP[in] = 1; // set inode block to 1 in bitmap
+	} 
+
+	MOUNTED = 1; // boolean necessary for other functions
 	return 1;
 }
 
 int fs_create()
 {
-	if(!MOUNTED || !FORMATTED) {
+	if(!MOUNTED) {
 		return 0;
 	}
 	int inumber;
@@ -220,7 +246,7 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	if(!MOUNTED || !FORMATTED) {
+	if(!MOUNTED) {
 		return 0;
 	}
 	int inode_in_block = inumber % INODES_PER_BLOCK;
@@ -234,6 +260,7 @@ int fs_delete( int inumber )
 		return 0;
 	}
 
+	// invalidate & clear inode
 	inode_block.inode[inode_in_block].isvalid = 0;
 	inode_block.inode[inode_in_block].size = 0;
 	disk_write(block, inode_block.data);
@@ -244,19 +271,13 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
-	if(!MOUNTED || !FORMATTED) {
+	if(!MOUNTED) {
 		return 0;
 	}
 
 	struct fs_inode curr_inode;
 	inode_load(inumber, &curr_inode);
-	/*
-	int inode_in_block = inumber % INODES_PER_BLOCK;
-	int block = (inumber - inode_in_block) / INODES_PER_BLOCK + 1;
-
-	union fs_block inode_block;
-	disk_read(block, inode_block.data);
-	*/
+	
 	// fail if inode is invalid
 	if(!curr_inode.isvalid) {
 		return -1;
@@ -268,7 +289,7 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	if(!MOUNTED || !FORMATTED) {
+	if(!MOUNTED) {
 		return 0;
 	}
 
@@ -348,7 +369,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
-	if(!MOUNTED || !FORMATTED) {
+	if(!MOUNTED) {
 		return 0;
 	}
 	/* Write data to a valid inode. 
@@ -376,7 +397,8 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	// if the given inumber is invalid, return 0
 	if(iblock.inode[inode_in_block].isvalid != 1) {
-		return 0;
+		printf("ERROR: inode not created\n");
+		return -1;
 	}
 
 	int bit;
@@ -386,17 +408,20 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	/* Prepare for writing */
 
 	// Find free bit in bitmap
-	for (bit = SUPER_BLOCK.super.ninodeblocks + 1; bit < SUPER_BLOCK.super.ninodeblocks; bit++) {
+	for (bit = SUPER_BLOCK.super.ninodeblocks + 1; bit < SUPER_BLOCK.super.nblocks; bit++) {
 		if (BITMAP[bit] == 0) {
 			curr_bit = bit;
+			BITMAP[bit] = 1;
 			break;
 		}
 	}
 
 	// no free bit, return 0
 	if (curr_bit == -1) {
-		return 0;
+		printf("ERROR: no free blocks available\n");
+		return -1;
 	}
+	printf("bit: %d\n", curr_bit);
 
 	int curr_in_indirect;
 
@@ -406,22 +431,22 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	// one of the direct blocks of inode
 	if (offset_in_inode < POINTERS_PER_INODE) {
 		// set pointer
-		if (iblock.inode[inode_in_block].direct[offset_in_inode] == -1) {
+		if (iblock.inode[inode_in_block].direct[offset_in_inode] == 0) {
 			iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
 		}
 	} else { // indirect block
 		union fs_block indirect_block;
 		// if no indirect block allocated, allocate; else, read indirect block
-		if (iblock.inode[inode_in_block].indirect == -1) {
+		if (iblock.inode[inode_in_block].indirect == 0) {
 			// make indirect block
 			iblock.inode[inode_in_block].indirect = curr_bit;
 			disk_read(curr_bit, indirect_block.data);
 
 			int indirect_pointers[POINTERS_PER_BLOCK];
 
-			// initialize all pointers of the indirect block to -1
+			// initialize all pointers of the indirect block to 0
 			for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
-				indirect_pointers[i] = -1;
+				indirect_pointers[i] = 0;
 				indirect_block.pointers[i] = indirect_pointers[i];
 			}
 
@@ -452,7 +477,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			// find vacancy in indirect block
 
 			for (curr_in_indirect = 0; curr_in_indirect < POINTERS_PER_BLOCK; curr_in_indirect++) {
-				if (indirect_block.pointers[curr_in_indirect] == -1) {
+				if (indirect_block.pointers[curr_in_indirect] == 0) {
 					break;
 				}
 			}
@@ -542,7 +567,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				int indirect_pointers[POINTERS_PER_BLOCK];
 
 				for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
-					indirect_pointers[i] = -1;
+					indirect_pointers[i] = 0;
 					indirect_block.pointers[i] = indirect_pointers[i];
 				}
 
