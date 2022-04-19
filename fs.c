@@ -162,10 +162,11 @@ void fs_debug()
 			}
 		}
 	}
+	/*
 	for(int i = 0; i < SUPER_BLOCK.super.nblocks; i++) {
 		printf("%d ", BITMAP[i]);
 	}
-	printf("\n");
+	printf("\n");*/
 }
 
 // build free block bitmap & prepare fs for use
@@ -192,7 +193,6 @@ int fs_mount()
 		for(int ifdata = 0; ifdata < INODES_PER_BLOCK; ifdata++) {
 			if(inode_block.inode[ifdata].isvalid) {
 				// check for direct data
-				int endofdata = 0;
 				for (int data = 0; data < POINTERS_PER_INODE; data++) {
 					if (inode_block.inode[ifdata].direct[data] > 0) {
 						BITMAP[inode_block.inode[ifdata].direct[data]] = 1;
@@ -384,9 +384,9 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		return 0;
 	}
 
-	// if offset exceeds block size, return 0
+	// if offset exceeds block size, return -1
 	if (offset >= MAX_OFFSET) {
-		return 0;
+		return -1;
 	}
 
 	int inode_in_block = inumber % INODES_PER_BLOCK;
@@ -395,7 +395,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	union fs_block iblock;
 	disk_read(block, iblock.data);
 
-	// if the given inumber is invalid, return 0
+	// if the given inumber is invalid, return -1
 	if(iblock.inode[inode_in_block].isvalid != 1) {
 		printf("ERROR: inode not created\n");
 		return -1;
@@ -433,6 +433,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		// set pointer
 		if (iblock.inode[inode_in_block].direct[offset_in_inode] == 0) {
 			iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
+			BITMAP[curr_bit] = 1;
 		}
 	} else { // indirect block
 		union fs_block indirect_block;
@@ -453,7 +454,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			int used_bit = curr_bit;
 
 			// Find free bit in bitmap
-			for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.ninodeblocks; bit++) {
+			for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.nblocks; bit++) {
 				if (BITMAP[bit] == 0) {
 					BITMAP[used_bit] = 1;
 					curr_bit = bit;
@@ -493,7 +494,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	union fs_block direct_block;
 	disk_read(curr_bit, direct_block.data);
 
-	char * r_data = data;
+	char * r_data = data; // i think this poses an issue
 
 	int actual_written = 0;
 
@@ -536,6 +537,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.ninodeblocks; bit++) {
 				if (BITMAP[bit] == 0) {
 					curr_bit = bit;
+					BITMAP[bit] = 1;
 					break;
 				}
 			}
