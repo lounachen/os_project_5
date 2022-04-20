@@ -289,6 +289,7 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
+
 	if(!MOUNTED) {
 		return 0;
 	}
@@ -369,6 +370,8 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	
+	
 	if(!MOUNTED) {
 		return 0;
 	}
@@ -403,7 +406,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	int bit;
 	int curr_bit = -1;
-	int blocks_needed;
+	//int blocks_needed;
 
 	/* Prepare for writing */
 
@@ -421,17 +424,16 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		printf("ERROR: no free blocks available\n");
 		return -1;
 	}
-	printf("bit: %d\n", curr_bit);
 
 	int curr_in_indirect;
 
 	// direct[0|1|2|3|4] or indirect
 	int offset_in_inode = offset / DISK_BLOCK_SIZE;
-
 	// one of the direct blocks of inode
 	if (offset_in_inode < POINTERS_PER_INODE) {
+		
 		// set pointer
-		if (iblock.inode[inode_in_block].direct[offset_in_inode] == 0) {
+		if (iblock.inode[inode_in_block].direct[offset_in_inode] != curr_bit) {
 			iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
 			BITMAP[curr_bit] = 1;
 		}
@@ -473,6 +475,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			// link the first direct block to indirect block
 			indirect_block.pointers[0] = curr_bit;
 		} else { // indirect block exists, access it
+
 			disk_read(iblock.inode[inode_in_block].indirect, indirect_block.data);
 
 			// find vacancy in indirect block
@@ -487,14 +490,14 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			indirect_block.pointers[curr_in_indirect] = curr_bit;
 		}
 	}
-	offset_in_inode += 1;
-
+	//offset_in_inode +=1;
 	offset = offset % 4096;
 
 	union fs_block direct_block;
 	disk_read(curr_bit, direct_block.data);
 
-	char * r_data = data; // i think this poses an issue
+	char r_data[strlen(data)+1];
+    strncpy(r_data, data, strlen(data)+1); // i think this poses an issue
 
 	int actual_written = 0;
 
@@ -502,12 +505,14 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		// check if length + offset is less than a block size 
 		if (length <= DISK_BLOCK_SIZE - offset) {
 			char temp[length];
-			snprintf(temp, length, "%s", r_data);
+			snprintf(temp, length, "%s", data); //changed from r_data
 			memcpy(&direct_block.data[offset], temp, strlen(temp));
-
+			
+			if (offset_in_inode < 5){
+				iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
+			}
 			// write to disk
 			disk_write(curr_bit, direct_block.data);
-
 			iblock.inode[inode_in_block].size += length;
 			actual_written += length;
 			// update size
@@ -515,13 +520,17 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 			offset = 0;
 			length = 0;
+			
+			return actual_written;
+
 		// length exceeds a block 
 		} else {
 			char temp[DISK_BLOCK_SIZE - offset];
-			snprintf(temp, DISK_BLOCK_SIZE - offset, "%s", r_data);
-			memcpy(&direct_block.data[offset], temp, strlen(temp));
+			snprintf(temp, DISK_BLOCK_SIZE - offset, "%s", r_data); //puts into temp as much data as we can handle for now
+			memcpy(&direct_block.data[offset], temp, strlen(temp)); //what is direct block refering to here?
 
 			memcpy(r_data, &data[offset], length - DISK_BLOCK_SIZE + offset);
+			
 			// write to disk
 			disk_write(curr_bit, direct_block.data);
 
@@ -534,7 +543,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			int used_bit = curr_bit;
 
 			// Find free bit in bitmap
-			for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.ninodeblocks; bit++) {
+			for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.nblocks; bit++) {
 				if (BITMAP[bit] == 0) {
 					curr_bit = bit;
 					BITMAP[bit] = 1;
@@ -547,15 +556,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				return actual_written;
 			}
 
-			// find vacant direct block
-			// if ()
-			//for (int i = offset_in_inode; i < POINTERS_PER_INODE; i ++) {
-			//	if (iblock.inode[inode_in_block].direct[offset_in_inode] == -1) {
-			//		offset_in_inode = i;
-			//		break;
-			//	}
-			//}
-
+			
 			if (offset_in_inode < 5) {
 				// set pointer
 				iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
@@ -577,7 +578,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 				int used_bit = curr_bit;
 				// Find free bit in bitmap
-				for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.ninodeblocks; bit++) {
+				for (bit = curr_bit + 1; bit < SUPER_BLOCK.super.nblocks; bit++) {
 					if (BITMAP[bit] == 0) {
 						curr_bit = bit;
 						break;
@@ -595,8 +596,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 				curr_in_indirect += 1;
 				union fs_block indirect_block;
 				disk_read(iblock.inode[inode_in_block].indirect, indirect_block.data);
-				indirect_block.pointers
-				[curr_in_indirect] = curr_bit;
+				indirect_block.pointers[curr_in_indirect] = curr_bit;
 			}
 			offset_in_inode += 1;
 			offset = 0;
