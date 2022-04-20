@@ -142,6 +142,7 @@ void fs_debug()
 							if (k > 0) {
 								printf(" ");
 							}
+
 							printf("%d", curr_block.inode[j].direct[k]);
 						}
 					}
@@ -259,7 +260,21 @@ int fs_delete( int inumber )
 	if(inode_block.inode[inode_in_block].isvalid != 1) {
 		return 0;
 	}
-
+	int curr_bit;
+	//invalidate & clear direct blocks associated with inode
+	for (int offset_in_inode=0; offset_in_inode<5; offset_in_inode++){
+		if (inode_block.inode[inode_in_block].direct[offset_in_inode]!=0){
+			curr_bit=inode_block.inode[inode_in_block].direct[offset_in_inode];
+			inode_block.inode[inode_in_block].direct[offset_in_inode]=0;
+			BITMAP[curr_bit]=0;
+		}
+	}
+	//clear indirect block
+	if(inode_block.inode[inode_in_block].indirect!=0){
+		curr_bit=inode_block.inode[inode_in_block].indirect;
+		inode_block.inode[inode_in_block].indirect=0;
+		BITMAP[curr_bit]=0;
+	}
 	// invalidate & clear inode
 	inode_block.inode[inode_in_block].isvalid = 0;
 	inode_block.inode[inode_in_block].size = 0;
@@ -509,6 +524,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			memcpy(&direct_block.data[offset], temp, strlen(temp));
 			
 			if (offset_in_inode < 5){
+				curr_bit+=1;
 				iblock.inode[inode_in_block].direct[offset_in_inode] = curr_bit;
 			}
 			// write to disk
